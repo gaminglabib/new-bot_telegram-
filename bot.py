@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import (
@@ -7,22 +8,19 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from datetime import datetime
-
-API_TOKEN = '8103578297:AAEza3YSbol4ctPJnQnLOcIgwWgrabBJ2lU'
-ADMIN_ID = 7377185899
-ADMIN_PASSWORD = "TASLIMAlupa"
-CHANNEL_USERNAME = 'always_viral'
 
 logging.basicConfig(level=logging.INFO)
+
+API_TOKEN = os.getenv('API_TOKEN')  # Render environment থেকে নেবে
+ADMIN_ID = 7377185899
+CHANNEL_USERNAME = 'always_viral'  # @ ছাড়া ইউজারনেম
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
 user_data = {
     'links': [],
-    'videos': [],
-    'users': set(),
-    'admins': set()
+    'videos': []
 }
 
 def main_menu():
@@ -52,14 +50,12 @@ async def is_user_joined_channel(user_id: int) -> bool:
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     full_name = message.from_user.full_name
-    user_data['users'].add(user_id)
 
     joined = await is_user_joined_channel(user_id)
 
     if not joined:
         join_btn = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Join Channel", url=f"https://t.me/{CHANNEL_USERNAME}")],
-            [InlineKeyboardButton(text="✅ Join করে এসেছি", callback_data="recheck_join")]
+            [InlineKeyboardButton(text="✅ Join Channel", url=f"https://t.me/{CHANNEL_USERNAME}")]
         ])
         await message.answer(
             f"""প্রিয় user: {full_name}
@@ -72,35 +68,35 @@ in arabic : السلام عليكم. ❤️‍🩹
 ভিডিও পেতে হলে, প্রথমে নিচের চ্যানেলটি জয়েন করতে হবে 🥰""",
             reply_markup=join_btn
         )
+        await message.answer("✅ Join করে আবার /start দিন")
     else:
         await message.answer(f"আপনি চ্যানেলটি জয়েন করেছেন, স্বাগতম {full_name}!", reply_markup=main_menu())
 
-@dp.callback_query(lambda c: c.data == "recheck_join")
-async def handle_join_check(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    joined = await is_user_joined_channel(user_id)
-    if joined:
-        await callback_query.message.answer("আপনি এখন সম্পূর্ণভাবে প্রবেশ করেছেন!", reply_markup=main_menu())
-    else:
-        await callback_query.message.answer("আপনি এখনো চ্যানেল Join করেননি!")
+# Admin password protection for /admin command
+ADMIN_PASSWORD = "TASLIMAlupa"
+admin_authenticated_users = set()
 
 @dp.message(lambda m: m.text == "/admin")
-async def admin_entry(message: types.Message):
-    if message.from_user.id in user_data['admins'] or message.from_user.id == ADMIN_ID:
-        return await show_admin_panel(message)
-    await message.answer("পাসওয়ার্ড দিন:")
+async def admin_auth_request(message: types.Message):
+    if message.from_user.id not in admin_authenticated_users:
+        await message.answer("অ্যাডমিন প্যানেলে প্রবেশের জন্য পাসওয়ার্ড লিখুন:")
+    else:
+        await show_admin_panel(message)
 
-@dp.message(lambda m: m.text == ADMIN_PASSWORD)
-async def admin_login(message: types.Message):
-    user_data['admins'].add(message.from_user.id)
-    await message.answer("✅ অ্যাডমিন প্যানেলে প্রবেশ সফল হয়েছে")
-    await show_admin_panel(message)
+@dp.message()
+async def check_admin_password(message: types.Message):
+    if message.from_user.id in admin_authenticated_users:
+        return  # Already authenticated
+    if message.text == ADMIN_PASSWORD and message.from_user.id == ADMIN_ID:
+        admin_authenticated_users.add(message.from_user.id)
+        await message.answer("অ্যাডমিন প্যানেলে স্বাগতম! কমান্ড ব্যবহার করুন।\n/admin দিয়ে আবার প্যানেল খুলুন।")
+    elif message.from_user.id == ADMIN_ID:
+        await message.answer("পাসওয়ার্ড ভুল হয়েছে। আবার চেষ্টা করুন।")
 
 async def show_admin_panel(message: types.Message):
     buttons = [
         [KeyboardButton("/userlist"), KeyboardButton("/add_link")],
-        [KeyboardButton("/add_video"), KeyboardButton("/stats")],
-        [KeyboardButton("/back")]
+        [KeyboardButton("/add_video"), KeyboardButton("/back")]
     ]
     markup = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     await message.answer("Admin Panel", reply_markup=markup)
@@ -165,40 +161,36 @@ async def back_to_main(message: types.Message):
 
 @dp.message(lambda m: m.text == "/userlist")
 async def user_list(message: types.Message):
-    if message.from_user.id not in user_data['admins'] and message.from_user.id != ADMIN_ID:
-        return await message.answer("❌ আপনি অ্যাডমিন না!")
-    total_users = len(user_data['users'])
-    await message.answer(f"মোট ইউজার সংখ্যা: {total_users}")
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ আপনি অ্যাডমিন না!")
+        return
+    await message.answer("ইউজার তালিকা CSV এ সংরক্ষিত থাকবে (ডেমো)")
 
 @dp.message(lambda m: m.text == "/add_link")
 async def add_link(message: types.Message):
-    await message.answer("নতুন লিংক দিন:")
+    if message.from_user.id != ADMIN_ID:
+        await message.reply("❌ আপনি অ্যাডমিন না!")
+        return
+    await message.answer("নতুন লিংক প্রদান করুন:")
 
 @dp.message(lambda m: m.text == "/add_video")
 async def add_video(message: types.Message):
-    await message.answer("নতুন ভিডিও লিংক দিন:")
-
-@dp.message(lambda m: m.text == "/stats")
-async def show_stats(message: types.Message):
-    total_users = len(user_data['users'])
-    total_links = len(user_data['links'])
-    total_videos = len(user_data['videos'])
-    await message.answer(f"Stats:
-Users: {total_users}
-Links: {total_links}
-Videos: {total_videos}")
+    if message.from_user.id != ADMIN_ID:
+        await message.reply("❌ আপনি অ্যাডমিন না!")
+        return
+    await message.answer("নতুন ভিডিও ইউআরএল প্রদান করুন:")
 
 @dp.message(lambda message: message.text and message.text.startswith("http"))
 async def handle_new_link_or_video(message: types.Message):
-    if message.from_user.id not in user_data['admins'] and message.from_user.id != ADMIN_ID:
+    if message.from_user.id != ADMIN_ID:
         return
     text = message.text.strip()
     if any(ext in text.lower() for ext in ['.mp4', '.mkv', '.mov', '.avi']):
         user_data['videos'].append(text)
-        await message.answer(f"নতুন ভিডিও {text} সফলভাবে যুক্ত হয়েছে")
+        await message.answer(f"নতুন ভিডিও {text} সফলভাবে যুক্ত করা হয়েছে।")
     else:
         user_data['links'].append(text)
-        await message.answer(f"নতুন লিংক {text} সফলভাবে যুক্ত হয়েছে")
+        await message.answer(f"নতুন লিংক {text} সফলভাবে যুক্ত করা হয়েছে।")
 
 async def main():
     await dp.start_polling(bot)
